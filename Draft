@@ -1,0 +1,114 @@
+import pandas as pd
+
+#read initial csv files
+path = "C:\\Users\\dansh\\Desktop\\VORP_draft_project\\"
+weights = pd.read_csv(path + "WEIGHT_MATRIX.csv").set_index('starters')
+weights.columns=weights.columns.astype(int)
+baseline = pd.read_csv(path + "POS_BASELINE.csv")
+proj = pd.read_csv(path + "Projections.csv").set_index('KEY')
+
+#establish league settings
+teams = input("How many teams: ")
+scoring = input("Scoring style (STD or PPR): ").upper()
+drafted_dict = {
+    'QB': 0,
+    'RB': 0,
+    'TE': 0,
+    'WR': 0
+    }
+
+#add std and ppr scoring columns
+def std_pts(pass_yds = 0, pass_tds = 0, pass_ints = 0,
+            rush_yds = 0, rush_tds = 0,
+            rec_rec = 0, rec_yds = 0, rec_tds = 0):
+    return round(pass_yds * 0.04 + pass_tds * 4 - pass_ints +
+                 rush_yds * 0.1 + rush_tds * 6 + 
+                 rec_yds * 0.1 + rec_tds * 6,3)
+
+def ppr_pts(pass_yds = 0, pass_tds = 0, pass_ints = 0,
+            rush_yds = 0, rush_tds = 0,
+            rec_rec = 0, rec_yds = 0, rec_tds = 0):
+    return round(pass_yds * 0.04 + pass_tds * 4 - pass_ints +
+                 rush_yds * 0.1 + rush_tds * 6 + 
+                 rec_rec * 1 + rec_yds * 0.1 + rec_tds * 6,3)
+
+proj['STD_PTS'] = std_pts(proj['PASS_YDS'],proj['PASS_TDS'],proj['PASS_INTS'],
+                           proj['RUSH_YDS'],proj['RUSH_TDS'],
+                           proj['REC_REC'],proj['REC_YDS'],proj['REC_TDS'])
+proj['PPR_PTS'] = ppr_pts(proj['PASS_YDS'],proj['PASS_TDS'],proj['PASS_INTS'],
+                           proj['RUSH_YDS'],proj['RUSH_TDS'],
+                           proj['REC_REC'],proj['REC_YDS'],proj['REC_TDS'])
+
+already_drafted = []
+
+#rank positional groups
+scoring_column = scoring + "_PTS"
+proj['RANK'] = proj.groupby('POS')[scoring_column].rank("dense",ascending=False)
+
+#Baseline calculations
+teams_convert = str(teams) + "_TEAM"
+
+QB_baseline = float(baseline.loc[((baseline['SCORING']==scoring)&
+                            (baseline['POSITION']=="QB")),
+                           teams_convert])
+TE_baseline = float(baseline.loc[((baseline['SCORING']==scoring)&
+                            (baseline['POSITION']=="TE")),
+                           teams_convert])
+WR_baseline = float(baseline.loc[((baseline['SCORING']==scoring)&
+                            (baseline['POSITION']=="WR")),
+                           teams_convert])
+RB_baseline = float(baseline.loc[((baseline['SCORING']==scoring)&
+                            (baseline['POSITION']=="RB")),
+                           teams_convert])
+
+position_info = {
+    'POSITION': ['QB', 'RB', 'TE', 'WR'],
+    'BASELINE': [float(proj.loc[(proj['RANK']==QB_baseline)&(proj['POS']=='QB'),scoring_column]),
+                 float(proj.loc[(proj['RANK']==RB_baseline)&(proj['POS']=='RB'),scoring_column]),
+                 float(proj.loc[(proj['RANK']==TE_baseline)&(proj['POS']=='TE'),scoring_column]),
+                 float(proj.loc[(proj['RANK']==WR_baseline)&(proj['POS']=='WR'),scoring_column])],
+    'STARTERS': [1, 2, 1, 2]
+    }
+position_info = pd.DataFrame(position_info).set_index('POSITION')
+
+#VORP Calculation
+proj['VORP'] = proj[scoring_column] - proj['POS'].map(position_info.to_dict('dict')['BASELINE'])
+
+def wVORP(df,drafted=0):
+    position = df['POS']
+    starters = position.map(position_info.to_dict('dict')['STARTERS'])
+    drafted_at_position = position.map(drafted_dict)
+    weight = starters.map(weights.to_dict('dict')[drafted[position]])
+    return weight * df['VORP']
+
+proj['wVORP']=wVORP(proj)
+
+#Positional drafted calculations
+def draft_calc(df):
+    if drafted_dict[df.loc[drafted_player,'POS']] != 4:
+        drafted_dict[df.loc[drafted_player,'POS']] += 1
+    return drafted_dict
+
+#Draft sequence
+drafted_player = 0
+while drafted_player != 999:
+    print(proj[['NAME','POS','TEAM','VORP','wVORP']].sort_values(by=['wVORP'],
+                                                                 ascending=False).head(15))
+    drafted_player=int(input("Enter Drafted Player (Enter 999 to exit): "))
+    if drafted_player == 999:
+        break
+    already_drafted.append(drafted_player)
+    draft_calc(proj)
+    print(proj.loc[drafted_player,'POS'])
+    print(drafted_dict)
+    print(type(drafted_dict))
+    print(already_drafted)
+    print(weights)
+    for i in already_drafted:
+        proj.at[i,'VORP']=0
+        proj['wVORP']=wVORP(proj)
+
+
+
+
+
